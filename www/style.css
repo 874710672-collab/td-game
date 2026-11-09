@@ -1,0 +1,77 @@
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%;background:#0d1017;color:#e7ecf5;
+  font-family:-apple-system,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+  overflow:hidden;overscroll-behavior:none;color-scheme:dark;
+  -webkit-user-select:none;user-select:none}
+
+#app{display:flex;flex-direction:column;height:100dvh}
+
+/* ---------- HUD ---------- */
+#hud{display:flex;align-items:center;gap:6px;padding:8px 10px;
+  background:#12161f;border-bottom:1px solid #1e2534;flex:0 0 auto}
+.hud-item{display:flex;flex-direction:column;line-height:1.15;min-width:44px}
+.hud-item.grow{flex:1}
+.hud-item .lbl{font-size:10px;color:#7a8598;letter-spacing:.5px}
+.hud-item b{font-size:15px;font-variant-numeric:tabular-nums}
+.hud-item b.life{color:#ef6b6b}
+.mini{background:#1b2130;color:#cfd8e6;border:1px solid #2a3346;border-radius:8px;
+  padding:7px 9px;font-size:13px;min-width:38px}
+.mini:active{background:#252d40}
+
+/* ---------- Stage ---------- */
+#stage{position:relative;flex:1;min-height:0;background:#0f131b}
+#cv{display:block;width:100%;height:100%;touch-action:none}
+
+/* ---------- 建造菜单 ---------- */
+#buildMenu,#towerPanel{position:absolute;background:#161b26;border:1px solid #2b3446;
+  border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.55);z-index:5;
+  padding:12px}
+#buildMenu{width:230px}
+.bm-title,.tp-title{font-size:13px;color:#8d99ad;margin-bottom:8px;letter-spacing:1px}
+#bmTowers{display:flex;flex-direction:column;gap:6px}
+.tower-opt{display:flex;align-items:center;gap:9px;background:#1e2533;border:1px solid #2c3547;
+  border-radius:10px;padding:8px 10px;text-align:left;color:#e7ecf5;width:100%;font-size:13px}
+.tower-opt:disabled{opacity:.38}
+.tower-opt:active:not(:disabled){background:#27303f}
+.tower-opt .dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto}
+.tower-opt .nm{flex:1}
+.tower-opt .cs{color:#f0c04a;font-variant-numeric:tabular-nums}
+.tower-opt .dsc{display:block;font-size:10px;color:#78849a;margin-top:1px}
+.bm-close{margin-top:9px;width:100%;background:#1b2130;color:#9aa5b8;border:1px solid #2a3346;
+  border-radius:9px;padding:8px;font-size:13px}
+
+/* ---------- 塔面板 ---------- */
+#towerPanel{width:236px}
+.tp-title .lv{color:#f0c04a;font-size:12px;margin-left:4px}
+.tp-stats{font-size:12px;color:#b6c1d2;line-height:1.7;margin-bottom:10px;
+  font-variant-numeric:tabular-nums}
+.tp-stats i{color:#8d99ad;font-style:normal;display:inline-block;width:52px}
+.tp-row{display:flex;gap:6px}
+.act{flex:1;padding:9px 0;border-radius:9px;border:1px solid #2a3346;background:#1b2130;
+  color:#cfd8e6;font-size:13px}
+.act:active{filter:brightness(1.3)}
+.act.up{background:#1c3b2c;border-color:#2c6b4a;color:#68e0a4}
+.act.sell{background:#3a1f26;border-color:#6b2c3a;color:#f0879a}
+.act:disabled{opacity:.4}
+
+/* ---------- 结算层 ---------- */
+#overlay{position:absolute;inset:0;background:rgba(8,10,15,.82);display:flex;
+  align-items:center;justify-content:center;z-index:9}
+.ov-card{background:#161b26;border:1px solid #2b3446;border-radius:18px;padding:26px 22px;
+  width:min(300px,86%);text-align:center}
+.ov-card h1{margin:0 0 10px;font-size:22px}
+.ov-card p{margin:0 0 18px;font-size:14px;color:#a8b3c6;line-height:1.6}
+.ov-card button{width:100%;padding:12px;border-radius:11px;border:none;font-size:15px;
+  background:#2f6fed;color:#fff}
+
+/* ---------- 底栏 ---------- */
+#tray{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:10px 12px;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom));
+  background:#12161f;border-top:1px solid #1e2534}
+.primary{background:#2f6fed;color:#fff;border:none;border-radius:11px;
+  padding:11px 18px;font-size:15px;font-weight:600;flex:0 0 auto}
+.primary:disabled{background:#243049;color:#6b7688}
+.primary:active:not(:disabled){background:#2a63d4}
+.tip{font-size:11px;color:#69758a;line-height:1.4}
+
+.hidden{display:none!important}
