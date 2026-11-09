@@ -1,0 +1,11 @@
+{
+  "appId": "com.tdgame.app",
+  "appName": "塔防",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
