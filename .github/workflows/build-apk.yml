@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,13 +22,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Show Android SDK env
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls -d "$ANDROID_HOME" 2>/dev/null || echo "no ANDROID_HOME"
-          ls /usr/local/lib/android/sdk 2>/dev/null | head || true
 
       - run: npm install
 
@@ -50,11 +46,30 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon
 
-      - name: Upload
+      - name: Prepare artifact
+        run: |
+          mkdir -p output
+          cp android/app/build/outputs/apk/debug/app-debug.apk output/td-game.apk
+          ls -lh output/
+
+      - name: Upload to Actions
         uses: actions/upload-artifact@v4
         with:
           name: td-game-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: output/td-game.apk
           retention-days: 90
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: 塔防 构建 ${{ github.run_number }}
+          body: |
+            塔防 · 守过二十波
+
+            直接下载 `td-game.apk` 安装，无需登录。
+          files: output/td-game.apk
+          draft: false
+          prerelease: false
