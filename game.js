@@ -769,6 +769,7 @@ function hidePanels() {
 
 function showBuildMenu(px, py, cell) {
   G.buildAt = { cell, px, py };
+  G.buildMenuAt = performance.now();
   const box = $('bmTowers');
   box.innerHTML = '';
   for (const k of TOWER_KEYS) {
@@ -780,6 +781,8 @@ function showBuildMenu(px, py, cell) {
       <span class="nm">${def.name}<span class="dsc">${def.desc}</span></span>
       <span class="cs">${def.cost}</span>`;
     b.onclick = () => {
+      // 防误触：菜单刚弹出的瞬间不接受选择
+      if (performance.now() - (G.buildMenuAt || 0) < 250) return;
       if (buildTower(k, cell.x, cell.y)) hidePanels();
     };
     box.appendChild(b);
@@ -788,6 +791,7 @@ function showBuildMenu(px, py, cell) {
   m.classList.remove('hidden');
   const stage = $('stage');
   const mw = 230, mh = m.offsetHeight || 260;
+  // 优先右上方，避开手指位置；放不下就翻到左侧
   let left = px + 14, top = py - mh / 2;
   if (left + mw > stage.clientWidth - 6) left = px - mw - 14;
   if (left < 6) left = 6;
@@ -844,6 +848,10 @@ function localPos(ev) {
 
 cv.addEventListener('pointerdown', ev => {
   if (G.over) return;
+  // 关键：阻止触摸后浏览器补发的合成 click。
+  // 否则菜单弹在手指下方时，那次 click 会直接点到塔选项上，
+  // 表现就是「点一下空地就直接建塔，跳过了选择」。
+  ev.preventDefault();
   const p = localPos(ev);
   const cell = toCell(p.x, p.y);
 
