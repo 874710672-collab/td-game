@@ -61,28 +61,36 @@ const ENEMIES = {
   boss:   { name: '首领', color: '#ef4444', hp: 1100, speed: 0.62, gold: 140, r: 20, dmg: 5, armor: 10, boss: true }
 };
 
-/* 20 波敌人配置 */
-const WAVES = (() => {
-  const list = [];
-  for (let w = 1; w <= 20; w++) {
-    const groups = [];
-    const hpScale = (1 + (w - 1) * 0.28) * (w >= 10 ? Math.pow(1.04, w - 9) : 1);
-    if (w % 5 === 0) {
-      groups.push({ type: 'boss', n: w >= 15 ? 2 : 1, gap: 1.6, hpScale: (1 + (w - 1) * 0.34) * (w >= 10 ? Math.pow(1.045, w - 9) : 1) });
-      groups.push({ type: 'grunt', n: 6 + w, gap: 0.35, hpScale });
-    } else if (w === 1) {
-      groups.push({ type: 'grunt', n: 3, gap: 0.9, hpScale: 1 });
-    } else {
-      groups.push({ type: 'grunt', n: 4 + Math.floor(w * 1.6), gap: 0.5, hpScale });
-      if (w >= 2) groups.push({ type: 'runner', n: 2 + Math.floor(w * 0.9), gap: 0.4, hpScale });
-      if (w >= 4) groups.push({ type: 'tank', n: Math.floor(w / 2.5), gap: 1.0, hpScale });
-      if (w >= 6) groups.push({ type: 'flyer', n: Math.floor(w / 1.6), gap: 0.55, hpScale });
-    }
-    list.push(groups);
+/* 无限模式：按需生成每一波
+   前 20 波沿用原曲线；之后数量封顶，只让血量继续线性增长，
+   避免无限叠加导致后期帧率崩掉 */
+function waveConfig(w) {
+  const groups = [];
+  // 前 20 波：线性增长，保持原手感
+  // 20 波后：转为温和的指数（每波约 ×1.055），让玩家能靠升级和补塔再撑 10-20 波
+  let hpScale;
+  if (w <= 20) {
+    hpScale = (1 + (w - 1) * 0.28) * (w >= 10 ? Math.pow(1.04, w - 9) : 1);
+  } else {
+    hpScale = (1 + 19 * 0.28) * Math.pow(1.04, 11) * Math.pow(1.055, w - 20);
   }
-  return list;
-})();
-const TOTAL_WAVES = WAVES.length;
+  const nClamp = (n, cap) => Math.min(n, cap);
+
+  if (w % 5 === 0) {
+    // 首领数量：前 10 波 1 只，之后每 10 波多一只，上限 4 只
+    const bosses = w < 10 ? 1 : Math.min(4, 1 + Math.floor((w - 10) / 10));
+    groups.push({ type: 'boss', n: bosses, gap: 1.6, hpScale: hpScale });
+    groups.push({ type: 'grunt', n: nClamp(6 + w, 40), gap: 0.35, hpScale });
+  } else if (w === 1) {
+    groups.push({ type: 'grunt', n: 3, gap: 0.9, hpScale: 1 });
+  } else {
+    groups.push({ type: 'grunt', n: nClamp(4 + Math.floor(w * 1.6), 46), gap: 0.5, hpScale });
+    if (w >= 2) groups.push({ type: 'runner', n: nClamp(2 + Math.floor(w * 0.9), 24), gap: 0.4, hpScale });
+    if (w >= 4) groups.push({ type: 'tank', n: nClamp(Math.floor(w / 2.5), 14), gap: 1.0, hpScale });
+    if (w >= 6) groups.push({ type: 'flyer', n: nClamp(Math.floor(w / 1.6), 20), gap: 0.55, hpScale });
+  }
+  return groups;
+}
 
 /* ============ 游戏状态 ============ */
 const G = {
@@ -242,12 +250,11 @@ function spawnEnemy(type, hpScale) {
 /* ============ 波次 ============ */
 function startWave() {
   if (G.running || G.over) return;
-  if (G.wave >= TOTAL_WAVES) return;
   G.wave++;
   G.running = true;
   G.spawnQueue = [];
   let t = 0;
-  for (const g of WAVES[G.wave - 1]) {
+  for (const g of waveConfig(G.wave)) {
     for (let i = 0; i < g.n; i++) {
       G.spawnQueue.push({ at: t, type: g.type, hpScale: g.hpScale });
       t += g.gap;
@@ -263,12 +270,9 @@ function startWave() {
 
 function waveCleared() {
   G.running = false;
-  G.gold += 25 + G.wave * 6;
+  // 奖励随波次线性增长，但设上限，防止后期金币无限堆积
+  G.gold += Math.min(25 + G.wave * 6, 240);
   updateHud();
-  if (G.wave >= TOTAL_WAVES) {
-    win();
-    return;
-  }
   const btn = document.getElementById('btnWave');
   btn.disabled = false;
   btn.textContent = `开始第 ${G.wave + 1} 波`;
@@ -755,9 +759,12 @@ function drawEffects() {
 const $ = id => document.getElementById(id);
 
 function updateHud() {
-  $('hWave').textContent = `${G.wave}/${TOTAL_WAVES}`;
+  $('hWave').textContent = `${G.wave}`;
   $('hLife').textContent = G.life;
   $('hGold').textContent = Math.floor(G.gold);
+  const best = Math.max(getBest(), G.wave);
+  const hb = $('hBest');
+  if (hb) hb.textContent = best;
   if (G.selected) showTowerPanel(G.selected);
 }
 
@@ -903,20 +910,36 @@ function showOverlay(title, text, btn, fn) {
 }
 
 function win() {
+  // 无限模式不再有「通关」，保留此函数供扩展
   G.over = true;
   hidePanels();
-  const btn = document.getElementById('btnWave');
-  btn.disabled = true;
-  btn.textContent = '通关';
-  showOverlay('守住了！', `20 波全部挡下，剩余生命 ${G.life}。`, '再来一局', () => location.reload());
+  showOverlay('守住了！', `剩余生命 ${G.life}。`, '再来一局', () => location.reload());
 }
+
+/* 最高波次记录（本地保存） */
+const BEST_KEY = 'td_best_wave';
+function getBest() {
+  try { return parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0; } catch (e) { return 0; }
+}
+function saveBest(w) {
+  try {
+    if (w > getBest()) { localStorage.setItem(BEST_KEY, String(w)); return true; }
+  } catch (e) {}
+  return false;
+}
+
 function lose() {
   G.over = true;
   hidePanels();
   const btn = document.getElementById('btnWave');
   btn.disabled = true;
   btn.textContent = '失守';
-  showOverlay('基地失守', `坚持到第 ${G.wave} 波。`, '重新开始', () => location.reload());
+  const prevBest = getBest();
+  const isNew = saveBest(G.wave);
+  let text = `坚持到第 ${G.wave} 波。`;
+  if (isNew) text += ` 新的最高纪录！（之前 ${prevBest} 波）`;
+  else text += ` 历史最高：第 ${prevBest} 波`;
+  showOverlay(isNew ? '新纪录！' : '基地失守', text, '再来一局', () => location.reload());
 }
 
 /* ============ 主循环 ============ */
