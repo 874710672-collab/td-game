@@ -1,7 +1,7 @@
 {
-  "name": "塔防 · 守过二十波",
+  "name": "塔防 · 无限",
   "short_name": "塔防",
-  "description": "五种塔、五种敌人、20 波生存塔防游戏",
+  "description": "五种塔、五种敌人的无限波次塔防",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
