@@ -1,0 +1,16 @@
+{
+  "name": "td-game",
+  "version": "1.0.0",
+  "description": "塔防 · 守过二十波",
+  "private": true,
+  "scripts": {
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
+  }
+}
