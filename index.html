@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d1017">
+<title>塔防 · 守过二十波</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header id="hud">
+    <div class="hud-item"><span class="lbl">波次</span><b id="hWave">0/20</b></div>
+    <div class="hud-item"><span class="lbl">生命</span><b id="hLife" class="life">20</b></div>
+    <div class="hud-item grow"><span class="lbl">金币</span><b id="hGold">150</b></div>
+    <button id="btnSpeed" class="mini">1×</button>
+    <button id="btnPause" class="mini">❚❚</button>
+  </header>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+
+    <div id="buildMenu" class="hidden">
+      <div class="bm-title">建造</div>
+      <div id="bmTowers"></div>
+      <button id="bmClose" class="bm-close">取消</button>
+    </div>
+
+    <div id="towerPanel" class="hidden">
+      <div class="tp-title"><span id="tpName"></span> <span id="tpLv" class="lv"></span></div>
+      <div class="tp-stats" id="tpStats"></div>
+      <div class="tp-row">
+        <button id="tpUp" class="act up">升级</button>
+        <button id="tpSell" class="act sell">卖掉</button>
+        <button id="tpClose" class="act">关闭</button>
+      </div>
+    </div>
+
+    <div id="overlay" class="hidden">
+      <div class="ov-card">
+        <h1 id="ovTitle"></h1>
+        <p id="ovText"></p>
+        <button id="ovBtn"></button>
+      </div>
+    </div>
+  </div>
+
+  <footer id="tray">
+    <button id="btnWave" class="primary">开始第 1 波</button>
+    <span id="tip" class="tip">点空地造塔 · 点塔可升级</span>
+  </footer>
+
+</div>
+<script src="game.js"></script>
+</body>
+</html>
