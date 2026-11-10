@@ -171,11 +171,18 @@ function posAt(dist) {
 
 /* 升级费用：每级涨 1.6 倍 */
 function upCostOf(t) {
-  return Math.round(TOWERS[t.type].upCost * Math.pow(1.6, t.lv - 1));
+  // 合成塔更贵：基础价按两座材料塔之和计
+  const base = t.mix
+    ? (TOWERS[t.mix.a].upCost + TOWERS[t.mix.b].upCost) * 2
+    : TOWERS[t.type].upCost;
+  return Math.round(base * Math.pow(1.6, t.lv - 1));
 }
 
 /* ============ 塔属性计算 ============ */
 function towerStats(t) {
+  // 合成塔：属性由两座材料塔直接相加，再乘合成倍率
+  if (t.mix) return mixStats(t);
+
   const def = TOWERS[t.type];
   const lv = t.lv - 1;
   const s = {};
@@ -189,6 +196,31 @@ function towerStats(t) {
   if (def.base.slow) s.slow = Math.min(0.75, def.base.slow + (def.grow.slow || 0) * lv);
   if (def.base.poison) s.poison = def.base.poison + (def.grow.poison || 0) * lv;
   if (def.base.chain) s.chain = def.base.chain + (def.grow.chain || 0) * lv;
+  return s;
+}
+
+/* 合成塔属性：两座材料塔满级属性相加，再乘合成强度 */
+const MERGE_BOOST = 1.25;
+function mixStats(t) {
+  const a = t.mix.statsA, b = t.mix.statsB;
+  const lvBonus = Math.pow(1.18, t.lv);   // 合成后还能继续升级
+  const s = {
+    dmg: (a.dmg + b.dmg) * MERGE_BOOST * lvBonus,
+    range: Math.max(a.range, b.range) + 0.3,
+    rate: Math.min(a.rate, b.rate) * 0.9,        // 取更快的那个，再略快
+  };
+  // 效果叠加：溅射 / 减速 / 中毒 / 连锁
+  if (a.splash || b.splash) s.splash = Math.max(a.splash || 0, b.splash || 0) + 0.25;
+  if (a.slow || b.slow) {
+    // 减速取两者之和（只有一方有时就是它本身），上限 85%
+    s.slow = Math.min(0.85, (a.slow || 0) + (b.slow || 0));
+    s.slowDur = Math.max(a.slowDur || 0, b.slowDur || 0) + 0.4;
+  }
+  if (a.poison || b.poison) {
+    s.poison = (a.poison || 0) + (b.poison || 0);
+    s.poisonDur = Math.max(a.poisonDur || 0, b.poisonDur || 0) + 1;
+  }
+  if (a.chain || b.chain) s.chain = (a.chain || 0) + (b.chain || 0);
   return s;
 }
 
@@ -231,6 +263,102 @@ function sellTower(t) {
   G.selected = null;
   hidePanels();
   updateHud();
+}
+
+/* ============ 合成 ============ */
+const MERGE_COST = 200;          // 每次合成的金币
+const MERGE_MAX_LV = 5;          // 合成塔也能升到 5 级
+
+/* 找出某座塔的相邻塔（上下左右） */
+function neighborsOf(t) {
+  return G.towers.filter(o =>
+    o !== t && Math.abs(o.cx - t.cx) + Math.abs(o.cy - t.cy) === 1
+  );
+}
+
+/* 找出可以跟它合成的塔：双方都满级 */
+function mergeableWith(t) {
+  if (t.lv < MAX_LV) return [];
+  return neighborsOf(t).filter(o => o.lv >= MAX_LV);
+}
+
+/* 塔的显示名（合成塔带组合名） */
+function towerName(t) {
+  if (t.mix) return t.mix.name;
+  return TOWERS[t.type].name;
+}
+
+/* 塔的显示颜色（合成塔取两色之间的混合） */
+function towerColor(t) {
+  if (!t.mix) return TOWERS[t.type].color;
+  return mixColor(TOWERS[t.mix.a].color, TOWERS[t.mix.b].color);
+}
+
+function mixColor(c1, c2) {
+  const p = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const [r1, g1, b1] = p(c1), [r2, g2, b2] = p(c2);
+  const to = n => n.toString(16).padStart(2, '0');
+  return '#' + to(Math.round((r1 + r2) / 2)) + to(Math.round((g1 + g2) / 2)) + to(Math.round((b1 + b2) / 2));
+}
+
+/* 把 t 和 other 合成，保留 t 的位置 */
+function mergeTowers(t, other) {
+  if (G.gold < MERGE_COST) return { ok: false, msg: '金币不足' };
+  const canA = t.mix ? mergeableWith(t) : [t];
+  if (t.lv < MAX_LV || other.lv < MAX_LV) return { ok: false, msg: '两座塔都要满级' };
+
+  const statsA = towerStats(t);
+  const statsB = towerStats(other);
+
+  G.gold -= MERGE_COST;
+
+  if (t.mix) {
+    // 合成塔 + 普通满级塔：效果继续叠加
+    t.mix.statsA = combineStats(t.mix.statsA, statsB);
+    t.mix.statsB = t.mix.statsB;
+    t.mix.a = t.mix.a;
+    t.mix.b = t.mix.b;
+    t.mix.count = (t.mix.count || 1) + 1;
+  } else {
+    // 两座普通塔：新合成塔，保留更强的那个类型作为主色
+    const aType = t.type, bType = other.type;
+    t.mix = {
+      a: aType, b: bType,
+      statsA: statsA, statsB: statsB,
+      name: aType === bType ? TOWERS[aType].name + '·双' : TOWERS[aType].name + '·' + TOWERS[bType].name,
+      count: 1
+    };
+    t.type = aType;
+    t.lv = 1;                 // 合成后从 1 级重新练
+    t.spent = Math.max(t.spent, other.spent);
+  }
+
+  G.towers = G.towers.filter(x => x !== other);
+  spawnMergeFx(t);
+  updateHud();
+  showTowerPanel(t);
+  return { ok: true };
+}
+
+/* 属性相加工具（用于合成塔再吸收新塔） */
+function combineStats(a, b) {
+  const s = { ...a };
+  s.dmg = (a.dmg || 0) + (b.dmg || 0) * MERGE_BOOST;
+  if (b.splash) s.splash = Math.max(a.splash || 0, b.splash) + 0.2;
+  if (b.slow) {
+    s.slow = Math.min(0.85, (a.slow || 0) + b.slow);
+    s.slowDur = Math.max(a.slowDur || 0, b.slowDur || 0);
+  }
+  if (b.poison) {
+    s.poison = (a.poison || 0) + b.poison;
+    s.poisonDur = Math.max(a.poisonDur || 0, b.poisonDur || 0);
+  }
+  if (b.chain) s.chain = (a.chain || 0) + b.chain;
+  return s;
+}
+
+function spawnMergeFx(t) {
+  addEffect({ kind: 'merge', x: t.cx + 0.5, y: t.cy + 0.5, t: 0, dur: 0.6 });
 }
 
 /* ============ 敌人 ============ */
@@ -582,20 +710,31 @@ function drawBuildHint() {
 
 function drawTowers() {
   for (const t of G.towers) {
-    const def = TOWERS[t.type];
+    const col = towerColor(t);
     const cx = t.cx + 0.5, cy = t.cy + 0.5;
     const rec = t.recoil > 0 ? t.recoil / 0.09 * 0.06 : 0;
+
+    // 合成塔：底部光环
+    if (t.mix) {
+      const pulse = 0.55 + Math.sin(G.time * 4 + t.cx) * 0.12;
+      const g = ctx.createRadialGradient(cx, cy, 0.1, cx, cy, 0.62);
+      g.addColorStop(0, hexA(col, 0.42 * pulse));
+      g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx, cy, 0.62, 0, Math.PI * 2); ctx.fill();
+    }
 
     // 底座
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath(); ctx.arc(cx, cy + 0.06, 0.34, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#232c3c';
+    ctx.fillStyle = t.mix ? '#2a2440' : '#232c3c';
     ctx.beginPath(); ctx.arc(cx, cy, 0.33, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = def.color;
-    ctx.lineWidth = 0.045;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = t.mix ? 0.06 : 0.045;
     ctx.stroke();
 
     // 等级刻度
+    const maxLv = t.mix ? MERGE_MAX_LV : MAX_LV;
     for (let i = 0; i < t.lv - 1; i++) {
       const a = -Math.PI / 2 + (i - (t.lv - 2) / 2) * 0.5;
       ctx.fillStyle = '#f0c04a';
@@ -604,15 +743,28 @@ function drawTowers() {
       ctx.fill();
     }
 
+    // 合成塔：外圈双环
+    if (t.mix) {
+      ctx.strokeStyle = hexA(col, 0.55);
+      ctx.lineWidth = 0.028;
+      ctx.beginPath(); ctx.arc(cx, cy, 0.47, 0, Math.PI * 2); ctx.stroke();
+      if (t.mix.count > 1) {
+        ctx.setLineDash([0.08, 0.07]);
+        ctx.beginPath(); ctx.arc(cx, cy, 0.54, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     // 炮身
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(t.angle);
     ctx.translate(-rec, 0);
-    ctx.fillStyle = def.color;
-    if (t.type === 'cannon') {
+    ctx.fillStyle = col;
+    const shape = t.mix ? t.mix.a : t.type;
+    if (shape === 'cannon') {
       ctx.fillRect(0, -0.1, 0.36, 0.2);
-    } else if (t.type === 'lightning') {
+    } else if (shape === 'lightning') {
       ctx.beginPath();
       ctx.moveTo(0.05, -0.13); ctx.lineTo(0.36, 0); ctx.lineTo(0.05, 0.13);
       ctx.closePath(); ctx.fill();
@@ -622,21 +774,29 @@ function drawTowers() {
     ctx.restore();
 
     // 中心
-    ctx.fillStyle = '#12161f';
+    ctx.fillStyle = t.mix ? '#1a1530' : '#12161f';
     ctx.beginPath(); ctx.arc(cx, cy, 0.14, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = def.color;
-    ctx.beginPath(); ctx.arc(cx, cy, 0.085, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(cx, cy, t.mix ? 0.1 : 0.085, 0, Math.PI * 2); ctx.fill();
 
     // 选中射程
     if (G.selected === t) {
       const s = towerStats(t);
-      ctx.strokeStyle = 'rgba(240,192,74,0.55)';
+      ctx.strokeStyle = t.mix ? 'rgba(200,160,255,0.6)' : 'rgba(240,192,74,0.55)';
       ctx.setLineDash([0.12, 0.1]);
       ctx.lineWidth = 0.035;
       ctx.beginPath(); ctx.arc(cx, cy, s.range, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]);
     }
   }
+}
+
+/* #rrggbb + alpha → rgba() */
+function hexA(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 function drawEnemies() {
@@ -751,6 +911,18 @@ function drawEffects() {
       ctx.strokeStyle = `rgba(255,255,255,${a * 0.8})`;
       ctx.lineWidth = 0.025;
       ctx.stroke();
+    } else if (ef.kind === 'merge') {
+      // 合成：扩散的紫色光环
+      const rr = 0.2 + p * 0.9;
+      ctx.strokeStyle = `rgba(180,140,255,${a})`;
+      ctx.lineWidth = 0.09 * (1 - p) + 0.02;
+      ctx.beginPath(); ctx.arc(ef.x, ef.y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = `rgba(240,220,255,${a * 0.7})`;
+      ctx.lineWidth = 0.03;
+      ctx.beginPath(); ctx.arc(ef.x, ef.y, rr * 0.65, 0, Math.PI * 2); ctx.stroke();
+      // 中心闪光
+      ctx.fillStyle = `rgba(255,255,255,${a * 0.85})`;
+      ctx.beginPath(); ctx.arc(ef.x, ef.y, 0.3 * (1 - p) + 0.05, 0, Math.PI * 2); ctx.fill();
     }
   }
 }
@@ -809,21 +981,22 @@ function showBuildMenu(px, py, cell) {
 
 function showTowerPanel(t) {
   G.selected = t;
-  const def = TOWERS[t.type];
   const s = towerStats(t);
-  $('tpName').textContent = def.name;
-  $('tpLv').textContent = `Lv.${t.lv}${t.lv >= MAX_LV ? ' (满级)' : ''}`;
+  $('tpName').textContent = towerName(t);
+  const maxLv = t.mix ? MERGE_MAX_LV : MAX_LV;
+  $('tpLv').textContent = `Lv.${t.lv}/${maxLv}${t.lv >= maxLv ? ' (满级)' : ''}`;
   let html = `<div><i>伤害</i>${s.dmg.toFixed(1)}</div>
     <div><i>射程</i>${s.range.toFixed(2)} 格</div>
     <div><i>攻速</i>${(1 / s.rate).toFixed(2)} 次/秒</div>`;
   if (s.splash) html += `<div><i>溅射</i>${s.splash.toFixed(2)} 格</div>`;
-  if (s.slow) html += `<div><i>减速</i>${Math.round(s.slow * 100)}% / ${s.slowDur}s</div>`;
-  if (s.poison) html += `<div><i>中毒</i>${s.poison.toFixed(1)}/秒 × ${s.poisonDur}s</div>`;
+  if (s.slow) html += `<div><i>减速</i>${Math.round(s.slow * 100)}% / ${(+s.slowDur).toFixed(1)}s</div>`;
+  if (s.poison) html += `<div><i>中毒</i>${s.poison.toFixed(1)}/秒 × ${(+s.poisonDur).toFixed(1)}s</div>`;
   if (s.chain) html += `<div><i>连锁</i>${s.chain} 个目标</div>`;
+  if (t.mix && t.mix.count > 1) html += `<div><i>合成</i>${t.mix.count} 合 1</div>`;
   $('tpStats').innerHTML = html;
 
   const upBtn = $('tpUp');
-  if (t.lv >= MAX_LV) {
+  if (t.lv >= maxLv) {
     upBtn.disabled = true;
     upBtn.textContent = '已满级';
   } else {
@@ -831,17 +1004,52 @@ function showTowerPanel(t) {
     upBtn.disabled = G.gold < cost;
     upBtn.textContent = `升级 ${cost}`;
   }
+
+  // 合成按钮：只有满级且左右上下有满级塔时才可用
+  const mgBtn = $('tpMerge');
+  if (mgBtn) {
+    if (t.lv < MAX_LV) {
+      mgBtn.classList.add('hidden');
+    } else {
+      mgBtn.classList.remove('hidden');
+      const partners = mergeableWith(t);
+      if (!partners.length) {
+        mgBtn.disabled = true;
+        mgBtn.textContent = '相邻没有满级塔';
+      } else if (G.gold < MERGE_COST) {
+        mgBtn.disabled = true;
+        mgBtn.textContent = `合成需 ${MERGE_COST}`;
+      } else {
+        mgBtn.disabled = false;
+        const p = partners[0];
+        mgBtn.textContent = `合成 → ${TOWERS[t.type].name}·${TOWERS[p.type].name} (${MERGE_COST})`;
+      }
+    }
+  }
+
   $('tpSell').textContent = `卖掉 +${Math.floor(t.spent * 0.6)}`;
 
   const p = $('towerPanel');
   p.classList.remove('hidden');
   const stage = $('stage');
   const cc = cellCenter(t.cx, t.cy);
-  const pw = 236, ph = p.offsetHeight || 190;
-  let left = cc.x + TILE * scale * 0.5 + 8, top = cc.y - ph / 2;
-  if (left + pw > stage.clientWidth - 6) left = cc.x - TILE * scale * 0.5 - pw - 8;
-  if (left < 6) left = 6;
-  top = Math.max(6, Math.min(stage.clientHeight - ph - 6, top));
+  const pw = p.offsetWidth || 230, ph = p.offsetHeight || 190;
+  const half = TILE * scale * 0.5;
+  const stageW = stage.clientWidth, stageH = stage.clientHeight;
+  const gap = 12;
+
+  // 优先放右侧；右侧空间不够就翻到左侧；都放不下就居中浮在塔上方
+  let left;
+  const rightRoom = stageW - (cc.x + half) - gap;
+  const leftRoom = (cc.x - half) - gap;
+  if (rightRoom >= pw) left = cc.x + half + gap;
+  else if (leftRoom >= pw) left = cc.x - half - pw - gap;
+  else left = Math.max(6, Math.min(stageW - pw - 6, cc.x - pw / 2));
+
+  // 垂直方向尽量与塔对齐，但不超出屏幕
+  let top = cc.y - ph / 2;
+  top = Math.max(6, Math.min(stageH - ph - 6, top));
+
   p.style.left = left + 'px';
   p.style.top = top + 'px';
   $('buildMenu').classList.add('hidden');
@@ -886,6 +1094,13 @@ $('bmClose').onclick = () => { hidePanels(); };
 $('tpClose').onclick = () => { hidePanels(); G.selected = null; };
 $('tpUp').onclick = () => { if (G.selected) upgradeTower(G.selected); };
 $('tpSell').onclick = () => { if (G.selected) sellTower(G.selected); };
+$('tpMerge').onclick = () => {
+  if (!G.selected) return;
+  const partners = mergeableWith(G.selected);
+  if (!partners.length) return;
+  const r = mergeTowers(G.selected, partners[0]);
+  if (!r.ok && r.msg) $('tip').textContent = r.msg;
+};
 
 $('btnWave').onclick = () => startWave();
 
