@@ -37,8 +37,8 @@ const TOWERS = {
   poison: {
     name: '毒塔', color: '#9ad46b', cost: 100,
     desc: '持续中毒，破高血',
-    base: { range: 2.5, dmg: 6, rate: 1.1, poison: 5, poisonDur: 3.5, bullet: 'venom' },
-    grow: { range: 0.2, dmg: 4, rate: 0.9, poison: 4 },
+    base: { range: 2.5, dmg: 6, rate: 1.1, poisonPct: 0.01, poisonDur: 3.5, bullet: 'venom' },
+    grow: { range: 0.2, dmg: 4, rate: 0.9, poisonPct: 0.01 },
     upCost: 95
   },
   lightning: {
@@ -47,6 +47,13 @@ const TOWERS = {
     base: { range: 2.8, dmg: 20, rate: 1.3, chain: 3, bullet: 'bolt' },
     grow: { range: 0.2, dmg: 14, rate: 0.9, chain: 1 },
     upCost: 130
+  },
+  wind: {
+    name: '风塔', color: '#7ef0d0', cost: 120,
+    desc: '不攻击，让身边闲置的塔打到它范围内的敌人',
+    base: { range: 3.2, dmg: 0, rate: 1, link: 4, bullet: 'wind' },
+    grow: { range: 0.25, link: 2 },
+    upCost: 110
   }
 };
 const TOWER_KEYS = Object.keys(TOWERS);
@@ -186,7 +193,7 @@ function towerStats(t) {
   const def = TOWERS[t.type];
   const lv = t.lv - 1;
   const s = {};
-  for (const k of ['range', 'dmg', 'rate', 'splash', 'slow', 'slowDur', 'poison', 'poisonDur', 'chain']) {
+  for (const k of ['range', 'dmg', 'rate', 'splash', 'slow', 'slowDur', 'poison', 'poisonDur', 'chain', 'poisonPct']) {
     if (def.base[k] !== undefined) s[k] = def.base[k];
   }
   s.dmg = def.base.dmg * Math.pow(1.72, lv);
@@ -194,9 +201,51 @@ function towerStats(t) {
   if (def.base.rate) s.rate = def.base.rate * Math.pow(def.grow.rate || 1, lv);
   if (def.base.splash) s.splash = def.base.splash + 0.08 * lv;
   if (def.base.slow) s.slow = Math.min(0.75, def.base.slow + (def.grow.slow || 0) * lv);
-  if (def.base.poison) s.poison = def.base.poison + (def.grow.poison || 0) * lv;
+  if (def.base.poisonPct) s.poisonPct = Math.min(0.05, def.base.poisonPct + (def.grow.poisonPct || 0) * lv);
   if (def.base.chain) s.chain = def.base.chain + (def.grow.chain || 0) * lv;
+  if (def.base.link) s.link = def.base.link + (def.grow.link || 0) * lv;
   return s;
+}
+
+/* ============ 风塔链接 ============
+   规则：被链接的塔必须 ①在风塔范围内 ②自己射程内没有目标 ③敌人也在风塔范围内
+   风塔可以同时链接多座塔，但不能链接风塔。 */
+function windLinks() {
+  const winds = G.towers.filter(t => t.type === 'wind' && !t.mix);
+  if (!winds.length) return [];
+  const links = [];
+  const used = new Set();
+
+  for (const w of winds) {
+    const ws = towerStats(w);
+    const wc = { x: w.cx + 0.5, y: w.cy + 0.5 };
+    let count = 0;
+    for (const t of G.towers) {
+      if (t === w || t.type === 'wind' || used.has(t)) continue;
+      if (count >= ws.link) break;
+      const tc = { x: t.cx + 0.5, y: t.cy + 0.5 };
+      // ① 塔在风塔范围内
+      if (Math.hypot(tc.x - wc.x, tc.y - wc.y) > ws.range) continue;
+      // ② 塔自己射程内没有目标（闲置状态）
+      const ts = towerStats(t);
+      const busy = G.enemies.some(e =>
+        !e.dead && Math.hypot(e.x - tc.x, e.y - tc.y) <= ts.range);
+      if (busy) continue;
+      // ③ 找风塔范围内走得最远的敌人
+      let best = null, bd = -1;
+      for (const e of G.enemies) {
+        if (e.dead) continue;
+        if (Math.hypot(e.x - wc.x, e.y - wc.y) <= ws.range && e.dist > bd) {
+          best = e; bd = e.dist;
+        }
+      }
+      if (!best) continue;
+      links.push({ wind: w, tower: t, target: best });
+      used.add(t);
+      count++;
+    }
+  }
+  return links;
 }
 
 /* 合成塔属性：两座材料塔满级属性相加，再乘合成强度 */
@@ -216,8 +265,9 @@ function mixStats(t) {
     s.slow = Math.min(0.85, (a.slow || 0) + (b.slow || 0));
     s.slowDur = Math.max(a.slowDur || 0, b.slowDur || 0) + 0.4;
   }
-  if (a.poison || b.poison) {
-    s.poison = (a.poison || 0) + (b.poison || 0);
+  if (a.poisonPct || b.poisonPct) {
+    // 合成后不随等级成长，直接封顶 5%
+    s.poisonPct = 0.05;
     s.poisonDur = Math.max(a.poisonDur || 0, b.poisonDur || 0) + 1;
   }
   if (a.chain || b.chain) s.chain = (a.chain || 0) + (b.chain || 0);
@@ -344,7 +394,7 @@ function spawnEnemy(type, hpScale) {
     dist: 0, x: 0, y: 0, ang: 0,
     speed: def.speed, r: def.r,
     slowT: 0, slowAmt: 0,
-    poisonT: 0, poisonDps: 0,
+    poisonT: 0, poisonPct: 0,
     hitFlash: 0, dead: false
   });
 }
@@ -401,7 +451,7 @@ function update(dt) {
     if (e.slowT > 0) e.slowT -= d;
     if (e.poisonT > 0) {
       e.poisonT -= d;
-      e.hp -= e.poisonDps * d;
+      e.hp -= e.maxHp * (e.poisonPct || 0) * d;
       if (e.hp <= 0) { e.dead = true; onEnemyDead(e); continue; }
     }
     if (e.hitFlash > 0) e.hitFlash -= d;
@@ -423,7 +473,12 @@ function update(dt) {
   G.enemies = G.enemies.filter(e => !e.dead);
 
   /* --- 塔开火 --- */
+  G.links = windLinks();
+  const linkedTowers = new Map();
+  for (const L of G.links) linkedTowers.set(L.tower, L);
+
   for (const t of G.towers) {
+    if (t.type === 'wind' && !t.mix) continue;   // 风塔本身不攻击
     t.cd -= d;
     if (t.recoil > 0) t.recoil -= d;
     const s = towerStats(t);
@@ -435,6 +490,11 @@ function update(dt) {
       if (Math.hypot(e.x - c.x, e.y - c.y) <= s.range && e.dist > bestDist) {
         best = e; bestDist = e.dist;
       }
+    }
+    // 自己射程内没人 → 看看有没有风塔链接
+    if (!best) {
+      const L = linkedTowers.get(t);
+      if (L && !L.target.dead) best = L.target;
     }
     if (best) {
       t.angle = Math.atan2(best.y - c.y, best.x - c.x);
@@ -566,11 +626,11 @@ function applyOnHit(e, s, far) {
     e.slowAmt = Math.max(hadT ? oldAmt : 0, s.slow);
     if (!far) { addEffect({ kind: 'frost', x: e.x, y: e.y, t: 0, dur: 0.3 }); shown = true; }
   }
-  if (s.poison) {
+  if (s.poisonPct) {
     e.poisonT = Math.max(e.poisonT, s.poisonDur);
-    e.poisonDps = Math.max(e.poisonDps || 0, s.poison);
+    e.poisonPct = Math.max(e.poisonPct || 0, s.poisonPct);
   }
-  if (!shown && !far && !s.slow && !s.poison) {
+  if (!shown && !far && !s.slow && !s.poisonPct) {
     addEffect({ kind: 'spark', x: e.x, y: e.y, t: 0, dur: 0.2 });
   }
 }
@@ -701,7 +761,51 @@ function drawBuildHint() {
   ctx.fill(); ctx.stroke();
 }
 
+/* 风塔链接线：塔 → 风塔 → 怪物，两条直线 */
+function drawWindLinks() {
+  const links = G.links || [];
+  if (!links.length) return;
+
+  for (const L of links) {
+    const wc = { x: L.wind.cx + 0.5, y: L.wind.cy + 0.5 };
+    const tc = { x: L.tower.cx + 0.5, y: L.tower.cy + 0.5 };
+    const e = L.target;
+    if (!e || e.dead) continue;
+
+    const pulse = 0.45 + Math.sin(G.time * 6) * 0.18;
+
+    // 第一段：塔 → 风塔
+    ctx.strokeStyle = `rgba(126,240,208,${pulse * 0.7})`;
+    ctx.lineWidth = 0.03;
+    ctx.setLineDash([0.09, 0.07]);
+    ctx.beginPath();
+    ctx.moveTo(tc.x, tc.y);
+    ctx.lineTo(wc.x, wc.y);
+    ctx.stroke();
+
+    // 第二段：风塔 → 怪物
+    ctx.strokeStyle = `rgba(126,240,208,${pulse})`;
+    ctx.lineWidth = 0.038;
+    ctx.setLineDash([0.12, 0.06]);
+    ctx.beginPath();
+    ctx.moveTo(wc.x, wc.y);
+    ctx.lineTo(e.x, e.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 风塔连到怪物这条线上跑的小光点
+    const tt = (G.time * 0.8) % 1;
+    const px = wc.x + (e.x - wc.x) * tt;
+    const py = wc.y + (e.y - wc.y) * tt;
+    ctx.fillStyle = `rgba(180,255,235,${0.9 - tt * 0.5})`;
+    ctx.beginPath(); ctx.arc(px, py, 0.07, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
 function drawTowers() {
+  // 先画风塔链接线（在塔下面）
+  drawWindLinks();
+
   for (const t of G.towers) {
     const col = towerColor(t);
     const cx = t.cx + 0.5, cy = t.cy + 0.5;
@@ -761,6 +865,18 @@ function drawTowers() {
       ctx.beginPath();
       ctx.moveTo(0.05, -0.13); ctx.lineTo(0.36, 0); ctx.lineTo(0.05, 0.13);
       ctx.closePath(); ctx.fill();
+    } else if (shape === 'wind') {
+      // 风塔：三道旋转的弧线，表示气流
+      ctx.rotate(G.time * 1.6);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 0.055;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 3; i++) {
+        const a0 = i * Math.PI * 2 / 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 0.19, a0, a0 + 0.85);
+        ctx.stroke();
+      }
     } else {
       ctx.fillRect(0, -0.055, 0.34, 0.11);
     }
@@ -983,7 +1099,7 @@ function showTowerPanel(t) {
     <div><i>攻速</i>${(1 / s.rate).toFixed(2)} 次/秒</div>`;
   if (s.splash) html += `<div><i>溅射</i>${s.splash.toFixed(2)} 格</div>`;
   if (s.slow) html += `<div><i>减速</i>${Math.round(s.slow * 100)}% / ${(+s.slowDur).toFixed(1)}s</div>`;
-  if (s.poison) html += `<div><i>中毒</i>${s.poison.toFixed(1)}/秒 × ${(+s.poisonDur).toFixed(1)}s</div>`;
+  if (s.poisonPct) html += `<div><i>中毒</i>每秒 ${(s.poisonPct*100).toFixed(0)}% 最大生命 × ${(+s.poisonDur).toFixed(1)}s</div>`;
   if (s.chain) html += `<div><i>连锁</i>${s.chain} 个目标</div>`;
   if (t.mix && t.mix.count > 1) html += `<div><i>合成</i>${t.mix.count} 合 1</div>`;
   $('tpStats').innerHTML = html;
