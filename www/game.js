@@ -37,8 +37,8 @@ const TOWERS = {
   poison: {
     name: '毒塔', color: '#9ad46b', cost: 100,
     desc: '持续中毒，破高血',
-    base: { range: 2.5, dmg: 6, rate: 1.1, poisonPct: 0.01, poisonDur: 3.5, bullet: 'venom' },
-    grow: { range: 0.2, dmg: 4, rate: 0.9, poisonPct: 0.01 },
+    base: { range: 2.5, dmg: 6, rate: 1.1, poisonPct: 0.002, poisonDur: 3.5, bullet: 'venom' },
+    grow: { range: 0.2, dmg: 4, rate: 0.9, poisonPct: 0.00325 },
     upCost: 95
   },
   lightning: {
@@ -201,7 +201,7 @@ function towerStats(t) {
   if (def.base.rate) s.rate = def.base.rate * Math.pow(def.grow.rate || 1, lv);
   if (def.base.splash) s.splash = def.base.splash + 0.08 * lv;
   if (def.base.slow) s.slow = Math.min(0.75, def.base.slow + (def.grow.slow || 0) * lv);
-  if (def.base.poisonPct) s.poisonPct = Math.min(0.05, def.base.poisonPct + (def.grow.poisonPct || 0) * lv);
+  if (def.base.poisonPct) s.poisonPct = Math.min(0.015, def.base.poisonPct + (def.grow.poisonPct || 0) * lv);
   if (def.base.chain) s.chain = def.base.chain + (def.grow.chain || 0) * lv;
   if (def.base.link) s.link = def.base.link + (def.grow.link || 0) * lv;
   return s;
@@ -266,8 +266,8 @@ function mixStats(t) {
     s.slowDur = Math.max(a.slowDur || 0, b.slowDur || 0) + 0.4;
   }
   if (a.poisonPct || b.poisonPct) {
-    // 合成后不随等级成长，直接封顶 5%
-    s.poisonPct = 0.05;
+    // 合成后不随等级成长，直接封顶 1.5%
+    s.poisonPct = 0.015;
     s.poisonDur = Math.max(a.poisonDur || 0, b.poisonDur || 0) + 1;
   }
   if (a.chain || b.chain) s.chain = (a.chain || 0) + (b.chain || 0);
@@ -1101,7 +1101,7 @@ function showTowerPanel(t) {
     <div><i>攻速</i>${(1 / s.rate).toFixed(2)} 次/秒</div>`;
   if (s.splash) html += `<div><i>溅射</i>${s.splash.toFixed(2)} 格</div>`;
   if (s.slow) html += `<div><i>减速</i>${Math.round(s.slow * 100)}% / ${(+s.slowDur).toFixed(1)}s</div>`;
-  if (s.poisonPct) html += `<div><i>中毒</i>每秒 ${(s.poisonPct*100).toFixed(0)}% 最大生命 × ${(+s.poisonDur).toFixed(1)}s</div>`;
+  if (s.poisonPct) html += `<div><i>中毒</i>每秒 ${(s.poisonPct*100).toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}% 最大生命 × ${(+s.poisonDur).toFixed(1)}s</div>`;
   if (s.chain) html += `<div><i>连锁</i>${s.chain} 个目标</div>`;
   if (t.mix && t.mix.count > 1) html += `<div><i>合成</i>${t.mix.count} 合 1</div>`;
   $('tpStats').innerHTML = html;
