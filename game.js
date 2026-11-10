@@ -328,10 +328,12 @@ function neighborsOf(t) {
 
 /* 找出可以跟它合成的塔：双方都满级 */
 function mergeableWith(t) {
+  // 风塔不参与合成
+  if (t.type === 'wind') return [];
   // 合成过的塔不能再合成（只能合成一次）
   if (t.mix) return [];
   if (t.lv < MAX_LV) return [];
-  return neighborsOf(t).filter(o => o.lv >= MAX_LV && !o.mix);
+  return neighborsOf(t).filter(o => o.lv >= MAX_LV && !o.mix && o.type !== 'wind');
 }
 
 /* 塔的显示名（合成塔带组合名） */
@@ -1117,7 +1119,7 @@ function showTowerPanel(t) {
   // 合成按钮：只有满级、没合成过、且相邻有满级普通塔时才可用
   const mgBtn = $('tpMerge');
   if (mgBtn) {
-    if (t.lv < MAX_LV || t.mix) {
+    if (t.lv < MAX_LV || t.mix || t.type === 'wind') {
       mgBtn.classList.add('hidden');
     } else {
       mgBtn.classList.remove('hidden');
