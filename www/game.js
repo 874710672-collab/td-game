@@ -278,8 +278,10 @@ function neighborsOf(t) {
 
 /* 找出可以跟它合成的塔：双方都满级 */
 function mergeableWith(t) {
+  // 合成过的塔不能再合成（只能合成一次）
+  if (t.mix) return [];
   if (t.lv < MAX_LV) return [];
-  return neighborsOf(t).filter(o => o.lv >= MAX_LV);
+  return neighborsOf(t).filter(o => o.lv >= MAX_LV && !o.mix);
 }
 
 /* 塔的显示名（合成塔带组合名） */
@@ -304,7 +306,7 @@ function mixColor(c1, c2) {
 /* 把 t 和 other 合成，保留 t 的位置 */
 function mergeTowers(t, other) {
   if (G.gold < MERGE_COST) return { ok: false, msg: '金币不足' };
-  const canA = t.mix ? mergeableWith(t) : [t];
+  if (t.mix || other.mix) return { ok: false, msg: '合成过的塔不能再合成' };
   if (t.lv < MAX_LV || other.lv < MAX_LV) return { ok: false, msg: '两座塔都要满级' };
 
   const statsA = towerStats(t);
@@ -312,49 +314,21 @@ function mergeTowers(t, other) {
 
   G.gold -= MERGE_COST;
 
-  if (t.mix) {
-    // 合成塔 + 普通满级塔：效果继续叠加
-    t.mix.statsA = combineStats(t.mix.statsA, statsB);
-    t.mix.statsB = t.mix.statsB;
-    t.mix.a = t.mix.a;
-    t.mix.b = t.mix.b;
-    t.mix.count = (t.mix.count || 1) + 1;
-  } else {
-    // 两座普通塔：新合成塔，保留更强的那个类型作为主色
-    const aType = t.type, bType = other.type;
-    t.mix = {
-      a: aType, b: bType,
-      statsA: statsA, statsB: statsB,
-      name: aType === bType ? TOWERS[aType].name + '·双' : TOWERS[aType].name + '·' + TOWERS[bType].name,
-      count: 1
-    };
-    t.type = aType;
-    t.lv = 1;                 // 合成后从 1 级重新练
-    t.spent = Math.max(t.spent, other.spent);
-  }
+  const aType = t.type, bType = other.type;
+  t.mix = {
+    a: aType, b: bType,
+    statsA: statsA, statsB: statsB,
+    name: aType === bType ? TOWERS[aType].name + '·双' : TOWERS[aType].name + '·' + TOWERS[bType].name,
+    count: 1
+  };
+  t.lv = 1;                 // 合成后从 1 级重新练
+  t.spent = Math.max(t.spent, other.spent);
 
   G.towers = G.towers.filter(x => x !== other);
   spawnMergeFx(t);
   updateHud();
   showTowerPanel(t);
   return { ok: true };
-}
-
-/* 属性相加工具（用于合成塔再吸收新塔） */
-function combineStats(a, b) {
-  const s = { ...a };
-  s.dmg = (a.dmg || 0) + (b.dmg || 0) * MERGE_BOOST;
-  if (b.splash) s.splash = Math.max(a.splash || 0, b.splash) + 0.2;
-  if (b.slow) {
-    s.slow = Math.min(0.85, (a.slow || 0) + b.slow);
-    s.slowDur = Math.max(a.slowDur || 0, b.slowDur || 0);
-  }
-  if (b.poison) {
-    s.poison = (a.poison || 0) + b.poison;
-    s.poisonDur = Math.max(a.poisonDur || 0, b.poisonDur || 0);
-  }
-  if (b.chain) s.chain = (a.chain || 0) + b.chain;
-  return s;
 }
 
 function spawnMergeFx(t) {
@@ -554,8 +528,10 @@ function fire(t, s, target, c) {
 function hitTarget(b) {
   const e = b.target;
   const s = b.stats;
-  const t = b.type;
-  if (t === 'cannon' && s.splash) {
+
+  // 按「实际拥有的属性」逐个触发，而不是按塔的类型分支。
+  // 合成塔（炮塔+冰塔）必须同时炸和冻，不能只走一条。
+  if (s.splash) {
     addEffect({ kind: 'boom', x: b.x, y: b.y, t: 0, dur: 0.35, r: s.splash });
     for (const o of G.enemies) {
       if (o.dead) continue;
@@ -563,22 +539,39 @@ function hitTarget(b) {
       if (dd <= s.splash) {
         const falloff = 1 - (dd / s.splash) * 0.45;
         damageEnemy(o, s.dmg * falloff, {});
+        applyOnHit(o, s, true);
       }
     }
-    return;
-  }
-  if (e && !e.dead) {
+  } else if (e && !e.dead) {
     damageEnemy(e, s.dmg, s);
-    if (t === 'frost') {
-      e.slowT = s.slowDur;
-      e.slowAmt = Math.max(e.slowAmt * (e.slowT > 0 ? 1 : 0), s.slow);
-      addEffect({ kind: 'frost', x: e.x, y: e.y, t: 0, dur: 0.3 });
-    } else if (t === 'poison') {
-      e.poisonT = s.poisonDur;
-      e.poisonDps = s.poison;
-    } else {
-      addEffect({ kind: 'spark', x: e.x, y: e.y, t: 0, dur: 0.2 });
-    }
+    applyOnHit(e, s);
+  }
+
+  // 溅射范围外的直接命中目标也要吃到效果
+  if (s.splash && e && !e.dead) {
+    const dd = Math.hypot(e.x - b.x, e.y - b.y);
+    if (dd > s.splash) applyOnHit(e, s);
+  }
+}
+
+/* 把减速 / 中毒等附加效果套到某个敌人身上 */
+function applyOnHit(e, s, far) {
+  if (!e || e.dead) return;
+  let shown = false;
+
+  if (s.slow) {
+    const hadT = e.slowT > 0;
+    const oldAmt = e.slowAmt;
+    e.slowT = Math.max(e.slowT, s.slowDur);
+    e.slowAmt = Math.max(hadT ? oldAmt : 0, s.slow);
+    if (!far) { addEffect({ kind: 'frost', x: e.x, y: e.y, t: 0, dur: 0.3 }); shown = true; }
+  }
+  if (s.poison) {
+    e.poisonT = Math.max(e.poisonT, s.poisonDur);
+    e.poisonDps = Math.max(e.poisonDps || 0, s.poison);
+  }
+  if (!shown && !far && !s.slow && !s.poison) {
+    addEffect({ kind: 'spark', x: e.x, y: e.y, t: 0, dur: 0.2 });
   }
 }
 
@@ -1005,10 +998,10 @@ function showTowerPanel(t) {
     upBtn.textContent = `升级 ${cost}`;
   }
 
-  // 合成按钮：只有满级且左右上下有满级塔时才可用
+  // 合成按钮：只有满级、没合成过、且相邻有满级普通塔时才可用
   const mgBtn = $('tpMerge');
   if (mgBtn) {
-    if (t.lv < MAX_LV) {
+    if (t.lv < MAX_LV || t.mix) {
       mgBtn.classList.add('hidden');
     } else {
       mgBtn.classList.remove('hidden');
