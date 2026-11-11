@@ -404,6 +404,12 @@ function spawnEnemy(type, hpScale) {
 /* ============ 波次 ============ */
 function startWave() {
   if (G.running || G.over) return;
+  // 记录本波开始时的状态，失败后可「重新挑战本关」
+  G.retryPoint = {
+    gold: G.gold,
+    life: G.life,
+    towers: G.towers.map(t => ({ ...t }))
+  };
   G.wave++;
   G.running = true;
   G.spawnQueue = [];
@@ -1049,6 +1055,14 @@ function updateHud() {
   const hb = $('hBest');
   if (hb) hb.textContent = best;
   if (G.selected) showTowerPanel(G.selected);
+  scheduleSave();
+}
+
+/* 节流存档：状态变化后 800ms 内最多写一次 */
+let _savePending = 0;
+function scheduleSave() {
+  if (_savePending) return;
+  _savePending = setTimeout(() => { _savePending = 0; saveGame(); }, 800);
 }
 
 function hidePanels() {
@@ -1226,20 +1240,91 @@ $('btnSpeed').onclick = () => {
 };
 
 /* ============ 结算 ============ */
-function showOverlay(title, text, btn, fn) {
+function showOverlay(title, text, buttons) {
   $('ovTitle').textContent = title;
   $('ovText').textContent = text;
-  const b = $('ovBtn');
-  b.textContent = btn;
-  b.onclick = fn;
+  const box = $('ovBtns');
+  box.innerHTML = '';
+  for (const b of buttons) {
+    const el = document.createElement('button');
+    el.className = b.primary ? 'ov-btn primary' : 'ov-btn';
+    el.textContent = b.label;
+    el.onclick = b.onClick;
+    box.appendChild(el);
+  }
   $('overlay').classList.remove('hidden');
 }
 
 function win() {
-  // 无限模式不再有「通关」，保留此函数供扩展
   G.over = true;
   hidePanels();
-  showOverlay('守住了！', `剩余生命 ${G.life}。`, '再来一局', () => location.reload());
+  showOverlay('守住了！', `剩余生命 ${G.life}。`,
+    [{ label: '再来一局', primary: true, onClick: () => location.reload() }]);
+}
+
+/* ============ 存档 ============
+   自动保存整局状态（金币、生命、波次、塔），关掉 App 再打开能接着打 */
+const SAVE_KEY = 'td_save_v1';
+let saveTimer = 0;
+
+function snapshot() {
+  return {
+    v: 1,
+    gold: G.gold, life: G.life, wave: G.wave,
+    towers: G.towers.map(t => ({
+      type: t.type, cx: t.cx, cy: t.cy, lv: t.lv, spent: t.spent, mix: t.mix
+    })),
+    time: Date.now()
+  };
+}
+
+function saveGame() {
+  // 失守状态不存（否则重开回来就是死的）
+  if (G.over) return;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot()));
+    const el = $('saveHint');
+    if (el) {
+      el.textContent = '已存档 ' + new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+      el.style.opacity = '1';
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+    }
+  } catch (e) {}
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || d.v !== 1) return null;
+    if (!d.towers || !d.towers.length) return null;   // 空局不恢复
+    return d;
+  } catch (e) { return null; }
+}
+
+function restoreGame(d) {
+  G.gold = d.gold;
+  G.life = d.life;
+  G.wave = d.wave;
+  G.over = false;
+  G.running = false;
+  G.paused = false;
+  G.enemies = []; G.bullets = []; G.effects = []; G.spawnQueue = [];
+  G.towers = d.towers.map(t => ({
+    type: t.type, cx: t.cx, cy: t.cy, lv: t.lv,
+    cd: 0, angle: -Math.PI / 2, spent: t.spent || 0, kills: 0,
+    recoil: 0, mix: t.mix || null
+  }));
+  updateHud();
+  const btn = $('btnWave');
+  btn.disabled = false;
+  btn.textContent = `开始第 ${G.wave + 1} 波`;
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
 }
 
 /* 最高波次记录（本地保存） */
@@ -1260,12 +1345,61 @@ function lose() {
   const btn = document.getElementById('btnWave');
   btn.disabled = true;
   btn.textContent = '失守';
+
   const prevBest = getBest();
   const isNew = saveBest(G.wave);
   let text = `坚持到第 ${G.wave} 波。`;
   if (isNew) text += ` 新的最高纪录！（之前 ${prevBest} 波）`;
   else text += ` 历史最高：第 ${prevBest} 波`;
-  showOverlay(isNew ? '新纪录！' : '基地失守', text, '再来一局', () => location.reload());
+
+  // 记住这波开始时的状态，用于「重新挑战本关」
+  const retryState = G.retryPoint;
+
+  showOverlay(isNew ? '新纪录！' : '基地失守', text, [
+    {
+      label: retryState ? `重新挑战第 ${G.wave} 波` : '重新挑战本关',
+      primary: true,
+      onClick: () => {
+        if (retryState) {
+          // 回到本波开始时的资源状态，金币不清零
+          G.gold = retryState.gold;
+          G.life = retryState.life;
+          G.towers = retryState.towers;
+          G.wave = G.wave - 1;
+        } else {
+          G.life = 20;
+          G.wave = Math.max(0, G.wave - 1);
+        }
+        G.over = false;
+        G.running = false;
+        G.paused = false;
+        G.enemies = []; G.bullets = []; G.effects = []; G.spawnQueue = [];
+        $('overlay').classList.add('hidden');
+        const b = $('btnWave');
+        b.disabled = false;
+        b.textContent = `开始第 ${G.wave + 1} 波`;
+        updateHud();
+        saveGame();
+      }
+    },
+    {
+      label: '从头开始',
+      onClick: () => {
+        clearSave();
+        G.gold = 220; G.life = 20; G.wave = 0;
+        G.towers = []; G.enemies = []; G.bullets = []; G.effects = []; G.spawnQueue = [];
+        G.over = false; G.running = false; G.paused = false;
+        $('overlay').classList.add('hidden');
+        const b = $('btnWave');
+        b.disabled = false;
+        b.textContent = '开始第 1 波';
+        hidePanels();
+        G.selected = null;
+        updateHud();
+        saveGame();
+      }
+    }
+  ]);
 }
 
 /* ============ 主循环 ============ */
@@ -1285,6 +1419,10 @@ function loop(ts) {
    否则切回来看到的是一片空白 */
 function boot() {
   resize();
+  const saved = loadGame();
+  if (saved) {
+    restoreGame(saved);
+  }
   updateHud();
   draw();
 }
@@ -1304,5 +1442,7 @@ setInterval(() => {
   }
 }, 200);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) { lastT = 0; resize(); draw(); }
+  if (document.hidden) { saveGame(); }
+  else { lastT = 0; resize(); draw(); }
 });
+window.addEventListener('pagehide', () => { saveGame(); });
