@@ -38,7 +38,7 @@ const TOWERS = {
     name: '毒塔', color: '#9ad46b', cost: 100,
     desc: '持续中毒，破高血',
     base: { range: 2.5, dmg: 6, rate: 1.1, poisonPct: 0.002, poisonDur: 3.5, bullet: 'venom' },
-    grow: { range: 0.2, dmg: 4, rate: 0.9, poisonPct: 0.00325 },
+    grow: { range: 0.2, dmg: 4, rate: 0.9, poisonPct: 0.0045 },
     upCost: 95
   },
   lightning: {
@@ -201,7 +201,7 @@ function towerStats(t) {
   if (def.base.rate) s.rate = def.base.rate * Math.pow(def.grow.rate || 1, lv);
   if (def.base.splash) s.splash = def.base.splash + 0.08 * lv;
   if (def.base.slow) s.slow = Math.min(0.75, def.base.slow + (def.grow.slow || 0) * lv);
-  if (def.base.poisonPct) s.poisonPct = Math.min(0.015, def.base.poisonPct + (def.grow.poisonPct || 0) * lv);
+  if (def.base.poisonPct) s.poisonPct = Math.min(0.02, def.base.poisonPct + (def.grow.poisonPct || 0) * lv);
   if (def.base.chain) s.chain = def.base.chain + (def.grow.chain || 0) * lv;
   if (def.base.link) s.link = def.base.link + (def.grow.link || 0) * lv;
   return s;
@@ -266,8 +266,8 @@ function mixStats(t) {
     s.slowDur = Math.max(a.slowDur || 0, b.slowDur || 0) + 0.4;
   }
   if (a.poisonPct || b.poisonPct) {
-    // 合成后不随等级成长，直接封顶 1.5%
-    s.poisonPct = 0.015;
+    // 合成后不随等级成长，直接封顶 2%
+    s.poisonPct = 0.02;
     s.poisonDur = Math.max(a.poisonDur || 0, b.poisonDur || 0) + 1;
   }
   if (a.chain || b.chain) s.chain = (a.chain || 0) + (b.chain || 0);
